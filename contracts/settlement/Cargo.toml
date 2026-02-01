@@ -1,0 +1,16 @@
+[package]
+name = "darkpool-settlement"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+
+[lib]
+crate-type = ["lib", "cdylib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }
+zk-bn254 = { path = "../../libs/zk-bn254" }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
