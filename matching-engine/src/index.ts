@@ -17,6 +17,7 @@ import {
   MerkleProof,
 } from "@rwa-darkpool/prover";
 import * as path from "path";
+import { eventBus } from "./events/EventBus";
 
 /** Contract addresses (testnet) - synced with apps/src/contracts/index.ts */
 const CONTRACTS = {
@@ -106,6 +107,15 @@ export class DarkPoolMatchingEngine {
     orders.get(order.assetAddress)!.push(order);
     console.log(`Order submitted: ${order.side === OrderSide.Buy ? "BUY" : "SELL"} ${order.quantity} @ ${order.price}`);
 
+    // Emit order:submitted event
+    eventBus.emit("order:submitted", {
+      orderId: order.commitment.slice(0, 16),
+      trader: order.trader,
+      asset: order.assetAddress,
+      side: order.side === OrderSide.Buy ? "buy" : "sell",
+      timestamp: Date.now(),
+    });
+
     /** Try to match */
     this.matchOrders(order.assetAddress);
   }
@@ -176,6 +186,17 @@ export class DarkPoolMatchingEngine {
 
         console.log(`Match found: ${match.matchId}`);
         console.log(`  Quantity: ${executionQuantity}, Price: ${executionPrice}`);
+
+        // Emit order:matched event
+        eventBus.emit("order:matched", {
+          matchId: match.matchId,
+          buyerAddress: buyOrder.trader,
+          sellerAddress: sellOrder.trader,
+          asset: assetAddress,
+          executionPrice: Number(executionPrice),
+          executionQuantity: Number(executionQuantity),
+          timestamp: Date.now(),
+        });
 
         break;
       }
@@ -274,6 +295,14 @@ export class DarkPoolMatchingEngine {
 
       console.log("\nGenerating ZK proof...");
 
+      // Emit proof:generating event
+      eventBus.emit("proof:generating", {
+        matchId: match.matchId,
+        buyerAddress: match.buyOrder.trader,
+        sellerAddress: match.sellOrder.trader,
+        timestamp: Date.now(),
+      });
+
       /** Generate settlement proof */
       const settlementProof = await generateSettlementProof(
         {
@@ -299,6 +328,15 @@ export class DarkPoolMatchingEngine {
       console.log("Proof generated successfully!");
       console.log("Nullifier:", settlementProof.nullifierHash.slice(0, 20) + "...");
 
+      // Emit proof:generated event
+      eventBus.emit("proof:generated", {
+        matchId: match.matchId,
+        buyerAddress: match.buyOrder.trader,
+        sellerAddress: match.sellOrder.trader,
+        proofHash: settlementProof.nullifierHash.slice(0, 32),
+        timestamp: Date.now(),
+      });
+
       return {
         matchId: match.matchId,
         proof: settlementProof.proofBytes,
@@ -316,6 +354,16 @@ export class DarkPoolMatchingEngine {
         console.error('[HINT] Line 87 is the SELL commitment verification');
         console.error('       Check that sellCommitment = Poseidon(assetHash, 1, qty, price, nonce, secret)');
       }
+
+      // Emit proof:failed event
+      eventBus.emit("proof:failed", {
+        matchId: match.matchId,
+        buyerAddress: match.buyOrder.trader,
+        sellerAddress: match.sellOrder.trader,
+        error: error.message,
+        timestamp: Date.now(),
+      });
+
       return {
         matchId: match.matchId,
         proof: Buffer.alloc(0),

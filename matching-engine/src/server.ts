@@ -14,6 +14,7 @@ import settlementRoutes, { setSettlementService } from "./routes/settlement";
 import whitelistRoutes, { setMatchingEngine as setWhitelistEngine } from "./routes/whitelist";
 import { DarkPoolMatchingEngine } from "./index";
 import { SettlementService } from "./services/settlement";
+import { MatchingEngineWebSocket } from "./websocket";
 
 // Environment configuration
 const PORT = process.env.PORT || 3001;
@@ -39,6 +40,9 @@ app.use((req, _res, next) => {
 const matchingEngine = new DarkPoolMatchingEngine(RPC_URL);
 const settlementService = new SettlementService(RPC_URL);
 
+// WebSocket server instance (initialized after HTTP server starts)
+let wsServer: MatchingEngineWebSocket | null = null;
+
 // Set engine/service references in route modules
 setOrdersEngine(matchingEngine);
 setOrdersSettlementService(settlementService);
@@ -59,10 +63,12 @@ app.use("/api/whitelist", whitelistRoutes);
 
 // Health check endpoint
 app.get("/health", (_req, res) => {
+  const wsStats = wsServer?.getStats() ?? { connections: 0, channels: 0, totalSubscriptions: 0 };
   res.json({
     status: "ok",
     timestamp: new Date().toISOString(),
     pendingMatches: matchingEngine.getPendingMatchesCount(),
+    websocket: wsStats,
   });
 });
 
@@ -147,13 +153,19 @@ async function start() {
     console.warn("Whitelist initialization skipped:", error.message);
   }
 
-  app.listen(PORT, () => {
+  // Start HTTP server and attach WebSocket
+  const server = app.listen(PORT, () => {
     console.log("-".repeat(60));
     console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`WebSocket available at ws://localhost:${PORT}`);
     console.log(`API documentation: http://localhost:${PORT}/api`);
     console.log(`Health check: http://localhost:${PORT}/health`);
     console.log("-".repeat(60));
   });
+
+  // Initialize WebSocket server
+  wsServer = new MatchingEngineWebSocket(server);
+  console.log("[WebSocket] Server initialized and listening for connections");
 }
 
 start().catch((error) => {

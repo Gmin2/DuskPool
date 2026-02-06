@@ -16,6 +16,7 @@ import {
 } from "@stellar/stellar-sdk";
 import { rpc } from "@stellar/stellar-sdk";
 import { Match, SettlementResult } from "../index";
+import { eventBus } from "../events/EventBus";
 
 /** Contract addresses (testnet) */
 const CONTRACT_IDS = {
@@ -78,6 +79,15 @@ export class SettlementService {
 
     this.pendingSettlements.set(match.matchId, settlement);
     console.log(`[Settlement] Queued settlement for match ${match.matchId} (ready for settlement)`);
+
+    // Emit settlement:queued event
+    eventBus.emit("settlement:queued", {
+      matchId: match.matchId,
+      buyerAddress: match.buyOrder.trader,
+      sellerAddress: match.sellOrder.trader,
+      asset: match.buyOrder.assetAddress,
+      timestamp: Date.now(),
+    });
 
     return settlement;
   }
@@ -220,6 +230,15 @@ export class SettlementService {
 
       console.log(`[Settlement] Transaction prepared successfully for match ${matchId}`);
 
+      // Emit settlement:txBuilt event
+      eventBus.emit("settlement:txBuilt", {
+        matchId,
+        buyerAddress: match.buyOrder.trader,
+        sellerAddress: match.sellOrder.trader,
+        txHash: preparedTx.hash().toString("hex"),
+        timestamp: Date.now(),
+      });
+
       // Return unsigned XDR (prepared with resource footprint)
       return preparedTx.toXDR();
     } catch (error: any) {
@@ -275,6 +294,16 @@ export class SettlementService {
             settlement.txHash = response.hash;
             settlement.updatedAt = Date.now();
             console.log(`[Settlement] Confirmed: ${response.hash}`);
+
+            // Emit settlement:confirmed event
+            eventBus.emit("settlement:confirmed", {
+              matchId,
+              buyerAddress: settlement.match.buyOrder.trader,
+              sellerAddress: settlement.match.sellOrder.trader,
+              txHash: response.hash,
+              timestamp: Date.now(),
+            });
+
             return { success: true, txHash: response.hash };
           } else {
             settlement.status = "failed";
@@ -282,6 +311,16 @@ export class SettlementService {
             settlement.error = errorMsg;
             settlement.updatedAt = Date.now();
             console.error(`[Settlement] ${errorMsg}`);
+
+            // Emit settlement:failed event
+            eventBus.emit("settlement:failed", {
+              matchId,
+              buyerAddress: settlement.match.buyOrder.trader,
+              sellerAddress: settlement.match.sellOrder.trader,
+              error: errorMsg,
+              timestamp: Date.now(),
+            });
+
             return { success: false, error: errorMsg };
           }
         } catch (pollError: any) {
@@ -298,11 +337,31 @@ export class SettlementService {
               settlement.txHash = response.hash;
               settlement.updatedAt = Date.now();
               console.log(`[Settlement] Confirmed via Horizon: ${response.hash}`);
+
+              // Emit settlement:confirmed event
+              eventBus.emit("settlement:confirmed", {
+                matchId,
+                buyerAddress: settlement.match.buyOrder.trader,
+                sellerAddress: settlement.match.sellOrder.trader,
+                txHash: response.hash,
+                timestamp: Date.now(),
+              });
+
               return { success: true, txHash: response.hash };
             } else if (horizonData.successful === false) {
               settlement.status = "failed";
               settlement.error = "Transaction failed on-chain";
               settlement.updatedAt = Date.now();
+
+              // Emit settlement:failed event
+              eventBus.emit("settlement:failed", {
+                matchId,
+                buyerAddress: settlement.match.buyOrder.trader,
+                sellerAddress: settlement.match.sellOrder.trader,
+                error: "Transaction failed on-chain",
+                timestamp: Date.now(),
+              });
+
               return { success: false, error: "Transaction failed on-chain" };
             }
           } catch (horizonError) {
@@ -419,9 +478,27 @@ export class SettlementService {
     settlement.status = "awaiting_signatures";
     settlement.updatedAt = Date.now();
 
+    // Emit signature:added event
+    eventBus.emit("signature:added", {
+      matchId,
+      signer: signerAddress,
+      role: isBuyer ? "buyer" : "seller",
+      buyerSigned: settlement.buyerSigned || false,
+      sellerSigned: settlement.sellerSigned || false,
+      timestamp: Date.now(),
+    });
+
     // Check if both have signed
     if (settlement.buyerSigned && settlement.sellerSigned) {
       console.log(`[Settlement] Both parties signed, submitting: ${matchId}`);
+
+      // Emit signature:complete event
+      eventBus.emit("signature:complete", {
+        matchId,
+        buyerAddress: settlement.match.buyOrder.trader,
+        sellerAddress: settlement.match.sellOrder.trader,
+        timestamp: Date.now(),
+      });
 
       // Submit the fully signed transaction
       const result = await this.submitSettlement(matchId, signedTxXdr);
