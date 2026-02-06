@@ -6,6 +6,8 @@ import { useMatchingEngine } from '../../hooks/useMatchingEngine';
 import { useOrderSecrets, StoredOrderSecret } from '../../hooks/useOrderSecrets';
 import { useSettlement } from '../../hooks/useSettlement';
 import { useMarketDataPersistence } from '../../hooks/useMarketDataPersistence';
+import { useMatchingEngineWS } from '../../hooks/useMatchingEngineWS';
+import { useMatchState } from '../../hooks/useMatchState';
 import { formatBigint, generateCommitmentAsync, bufferToHex } from '../../utils';
 import { OrderProgress, initialProgress } from './OrderProgress';
 
@@ -37,8 +39,6 @@ const Trade: React.FC = () => {
   const {
     submitPrivateOrder,
     checkHealth,
-    getMatches: getOffChainMatches,
-    getSettlementsForTrader,
     buildSettlementTx,
     submitSettlement,
     addSignature,
@@ -54,6 +54,21 @@ const Trade: React.FC = () => {
     getPersistedTrades,
     updateTrades,
   } = useMarketDataPersistence();
+
+  // WebSocket for real-time updates (shared with useMatchState)
+  const {
+    isConnected: wsConnected,
+    subscribe,
+    unsubscribe,
+    ping,
+    on: wsOn,
+  } = useMatchingEngineWS({
+    autoConnect: true,
+    reconnectAttempts: 5,
+    reconnectDelay: 1000,
+    onConnect: () => console.log('[Trade] WebSocket connected'),
+    onDisconnect: () => console.log('[Trade] WebSocket disconnected'),
+  });
 
   // Matching engine availability state
   const [isMatchingEngineAvailable, setIsMatchingEngineAvailable] = useState(false);
@@ -88,14 +103,42 @@ const Trade: React.FC = () => {
   // Data - real blockchain data
   const [candleData, setCandleData] = useState<CandlestickData<Time>[]>([]);
   const [orderBookData, setOrderBookData] = useState<OrderBookData>({ asks: [], bids: [], maxTotal: 0 });
-  const [openOrders, setOpenOrders] = useState<OpenOrder[]>([]);
   const [orderHistory, setOrderHistory] = useState<OpenOrder[]>([]);
   const [tradeHistory, setTradeHistory] = useState<TradeRecord[]>([]);
-  const [offChainMatches, setOffChainMatches] = useState<(OffChainMatch & { buyerSigned?: boolean; sellerSigned?: boolean; role?: 'buyer' | 'seller' })[]>([]);
-  const [isLoadingData, setIsLoadingData] = useState(false);
   const [isSettling, setIsSettling] = useState(false);
   const [isSigning, setIsSigning] = useState(false);
   const [settlementResult, setSettlementResult] = useState<SettlementResult | null>(null);
+
+  // Match state management with delta updates (professional DEX-style)
+  const {
+    offChainMatches,
+    displayedOpenOrders,
+    addOptimisticOrder,
+    removeOptimisticOrder,
+    refetchAll: refetchMatches,
+    setOpenOrders,
+  } = useMatchState({
+    address,
+    selectedAsset,
+    wsConnected,
+    wsOn,
+    onSettlementConfirmed: (data) => {
+      loadMarketData();
+      setSettlementResult({
+        status: 'success',
+        message: 'Trade has been settled on-chain. Funds have been exchanged.',
+        txHash: data.txHash,
+        matchId: data.matchId,
+      });
+    },
+    onSettlementFailed: (data) => {
+      setSettlementResult({
+        status: 'error',
+        message: data.error || 'Settlement failed',
+        matchId: data.matchId,
+      });
+    },
+  });
 
   // 24h stats
   const [priceChange24h, setPriceChange24h] = useState<number | undefined>(undefined);
@@ -217,7 +260,6 @@ const Trade: React.FC = () => {
       setTradeHistory(persistedTrades);
     }
 
-    setIsLoadingData(true);
     try {
       // Step 2: Fetch fresh data from API/chain
       // Load order book from matching engine (has real prices)
@@ -282,6 +324,7 @@ const Trade: React.FC = () => {
       // Load user's active orders
       const activeOrders = await getActiveOrders(selectedAsset.address);
       const userOrders = activeOrders.filter(o => o.trader === address);
+      console.log('[Trade] Active orders from chain:', activeOrders.length, 'user orders:', userOrders.length);
 
       const formattedOpenOrders: OpenOrder[] = userOrders
         .filter(o => o.status === OrderStatus.Active)
@@ -295,6 +338,7 @@ const Trade: React.FC = () => {
           amount: '---', // Hidden in ZK commitment
           status: 'open' as const,
         }));
+      console.log('[Trade] Formatted open orders:', formattedOpenOrders.length);
       setOpenOrders(formattedOpenOrders);
 
       // Load order history (matched/cancelled/expired orders)
@@ -410,8 +454,6 @@ const Trade: React.FC = () => {
 
     } catch (err) {
       console.error('Failed to load market data:', err);
-    } finally {
-      setIsLoadingData(false);
     }
   }, [selectedAsset, address, getOrdersByAsset, getActiveOrders, getSettlements, buildCandleDataFromMatches, isMatchingEngineAvailable, getOrderBookState, getPersistedCandles, getPersistedOrderBook, getPersistedTrades, updateCandles, updateOrderBook, updateTrades]);
 
@@ -419,7 +461,7 @@ const Trade: React.FC = () => {
     loadAssets();
   }, [loadAssets]);
 
-  // Check matching engine availability on mount
+  // Check matching engine availability on mount and via WebSocket
   useEffect(() => {
     const checkAvailability = async () => {
       const available = await checkHealth();
@@ -431,10 +473,20 @@ const Trade: React.FC = () => {
       }
     };
     checkAvailability();
-    // Check every 30 seconds
-    const interval = setInterval(checkAvailability, 30000);
-    return () => clearInterval(interval);
-  }, [checkHealth]);
+
+    // Use WebSocket ping as heartbeat if connected, otherwise poll less frequently
+    if (wsConnected) {
+      // WebSocket connected - use ping for heartbeat
+      const pingInterval = setInterval(() => {
+        ping();
+      }, 30000);
+      return () => clearInterval(pingInterval);
+    } else {
+      // WebSocket not connected - fallback to HTTP polling (less frequently)
+      const interval = setInterval(checkAvailability, 60000);
+      return () => clearInterval(interval);
+    }
+  }, [checkHealth, wsConnected, ping]);
 
   // Check participant eligibility when wallet connects
   useEffect(() => {
@@ -475,87 +527,30 @@ const Trade: React.FC = () => {
     checkEligibility();
   }, [isConnected, address, getParticipant, isParticipantEligible]);
 
-  // Load off-chain matches from matching engine
-  const loadOffChainMatches = useCallback(async () => {
-    if (!isMatchingEngineAvailable || !selectedAsset) return;
-
-    try {
-      // Fetch matches and user-specific settlements (with signing status)
-      const [matches, userSettlements] = await Promise.all([
-        getOffChainMatches(),
-        address ? getSettlementsForTrader(address).catch(() => []) : Promise.resolve([]),
-      ]);
-
-      // Create a map of settlement statuses by matchId (from user's settlements)
-      const settlementMap = new Map(
-        userSettlements.map(s => [s.matchId, s])
-      );
-
-      const formattedMatches: (OffChainMatch & { buyerSigned?: boolean; sellerSigned?: boolean; role?: 'buyer' | 'seller' })[] = [];
-      const completedTrades: TradeRecord[] = [];
-
-      matches.forEach(match => {
-        const settlement = settlementMap.get(match.matchId);
-        // Map settlement status to our frontend status type
-        let status: OffChainMatch['status'] = 'matched';
-        if (settlement) {
-          status = settlement.status;
-        }
-
-        // Determine user's role in this match
-        const isBuyer = match.buyOrder.trader === address;
-        const isSeller = match.sellOrder.trader === address;
-        const role = isBuyer ? 'buyer' as const : isSeller ? 'seller' as const : undefined;
-
-        // If this is a confirmed settlement, add to trade history instead of matches
-        if (status === 'confirmed' && (isBuyer || isSeller)) {
-          completedTrades.push({
-            id: match.matchId,
-            time: new Date(match.timestamp).toLocaleTimeString(),
-            pair: `${selectedAsset.symbol}/USDC`,
-            side: isBuyer ? 'buy' as const : 'sell' as const,
-            price: (Number(match.executionPrice) / 1e7).toFixed(2),
-            amount: (Number(match.executionQuantity) / 1e7).toFixed(2),
-            fee: '0.00',
-          });
-        } else if (isBuyer || isSeller) {
-          // Only show pending matches (not yet settled) in the Matches tab
-          formattedMatches.push({
-            matchId: match.matchId,
-            time: new Date(match.timestamp).toLocaleTimeString(),
-            pair: `${selectedAsset.symbol}/USDC`,
-            buyTrader: match.buyOrder.trader,
-            sellTrader: match.sellOrder.trader,
-            price: (Number(match.executionPrice) / 1e7).toFixed(2),
-            quantity: (Number(match.executionQuantity) / 1e7).toFixed(2),
-            status,
-            txHash: settlement?.txHash,
-            error: settlement?.error,
-            buyerSigned: settlement?.buyerSigned,
-            sellerSigned: settlement?.sellerSigned,
-            role,
-          });
-        }
-      });
-
-      setOffChainMatches(formattedMatches);
-      // Merge with existing trade history (avoiding duplicates)
-      setTradeHistory(prev => {
-        const existingIds = new Set(prev.map(t => t.id));
-        const newTrades = completedTrades.filter(t => !existingIds.has(t.id));
-        return [...newTrades, ...prev];
-      });
-    } catch (err) {
-      console.error('[Trade] Failed to load off-chain matches:', err);
-    }
-  }, [isMatchingEngineAvailable, selectedAsset, address, getOffChainMatches, getSettlementsForTrader]);
-
-  // Fetch off-chain matches periodically
+  // Subscribe to WebSocket channels for orderbook updates
   useEffect(() => {
-    loadOffChainMatches();
-    const interval = setInterval(loadOffChainMatches, 5000); // Every 5 seconds
-    return () => clearInterval(interval);
-  }, [loadOffChainMatches]);
+    if (!wsConnected || !selectedAsset) return;
+
+    // Subscribe to orderbook updates for the selected asset
+    const orderbookChannel = `orderbook:${selectedAsset.address}`;
+    subscribe(orderbookChannel);
+
+    // Subscribe to trader-specific updates if wallet is connected
+    if (address) {
+      const traderChannel = `trader:${address}`;
+      subscribe(traderChannel);
+    }
+
+    return () => {
+      unsubscribe(orderbookChannel);
+      if (address) {
+        unsubscribe(`trader:${address}`);
+      }
+    };
+  }, [wsConnected, selectedAsset, address, subscribe, unsubscribe]);
+
+  // NOTE: WebSocket event handling for matches is now done in useMatchState hook
+  // This eliminates polling and uses delta updates for professional DEX-style real-time updates
 
   // Load market data when asset changes
   useEffect(() => {
@@ -595,6 +590,17 @@ const Trade: React.FC = () => {
     setIsSubmitting(true);
     setSubmitError(null);
     setSubmitSuccess(false);
+
+    // Add optimistic order for immediate UI feedback
+    const optimisticTempId = addOptimisticOrder({
+      time: new Date().toLocaleTimeString(),
+      pair: `${selectedAsset.symbol}/USDC`,
+      type: 'Limit',
+      side: orderSide,
+      price: priceDisplay,
+      amount: amount,
+      status: 'pending',
+    });
 
     try {
       const qty = parseFloat(amount);
@@ -751,6 +757,8 @@ const Trade: React.FC = () => {
       setOrderProgress({ step: 'error', stepIndex: orderProgress.stepIndex, error: message });
     } finally {
       setIsSubmitting(false);
+      // Remove optimistic order - real order state comes from WebSocket events
+      removeOptimisticOrder(optimisticTempId);
     }
   };
 
@@ -800,7 +808,7 @@ const Trade: React.FC = () => {
       }
 
       // Refresh matches to show updated status
-      await loadOffChainMatches();
+      await refetchMatches();
     } catch (err) {
       console.error('[Trade] Settlement failed:', err);
       const message = err instanceof Error ? err.message : 'Settlement failed';
@@ -878,7 +886,7 @@ const Trade: React.FC = () => {
       }
 
       // Refresh matches to show updated status
-      await loadOffChainMatches();
+      await refetchMatches();
     } catch (err) {
       console.error('[Trade] Signing failed:', err);
       const message = err instanceof Error ? err.message : 'Signing failed';
@@ -938,7 +946,7 @@ const Trade: React.FC = () => {
           <TradeHistory
             activeTab={historyTab}
             setActiveTab={setHistoryTab}
-            openOrders={openOrders}
+            openOrders={displayedOpenOrders}
             orderHistory={orderHistory}
             tradeHistory={tradeHistory}
             offChainMatches={offChainMatches}

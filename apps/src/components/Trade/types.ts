@@ -39,7 +39,8 @@ export interface OpenOrder {
   side: 'buy' | 'sell';
   price: string;
   amount: string;
-  status: 'open' | 'filled' | 'cancelled';
+  status: 'open' | 'filled' | 'cancelled' | 'pending';
+  isOptimistic?: boolean;
 }
 
 export interface TradeRecord {

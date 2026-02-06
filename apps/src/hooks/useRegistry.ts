@@ -1,13 +1,28 @@
-import { useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { useWallet } from './useWallet';
 import { createRegistryClient } from '../contracts';
+import type { RWAAsset } from '../contracts/registry';
 
 // Re-export types for convenience
 export { AssetType, ParticipantCategory } from '../contracts/registry';
 export type { RWAAsset, Participant } from '../contracts/registry';
 
 export function useRegistry() {
-  const { address } = useWallet();
+  const { address, signTransaction } = useWallet();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Get client with public key for signing transactions
+  const getClient = useCallback(() => {
+    if (!address) throw new Error('Wallet not connected');
+    return createRegistryClient(address);
+  }, [address]);
+
+  // Wrapper to match SDK expected signature
+  const signTx = useCallback(async (xdr: string) => {
+    const signedXdr = await signTransaction(xdr);
+    return { signedTxXdr: signedXdr, signerAddress: address };
+  }, [signTransaction, address]);
 
   // Get all active assets
   const getActiveAssets = useCallback(async () => {
@@ -111,8 +126,82 @@ export function useRegistry() {
     }
   }, []);
 
+  // Get admin address
+  const getAdmin = useCallback(async (): Promise<string | null> => {
+    try {
+      const client = createRegistryClient();
+      const tx = await client.get_admin();
+      return tx.result;
+    } catch (err) {
+      console.error('Failed to get admin:', err);
+      return null;
+    }
+  }, []);
+
+  // Get all assets (including inactive)
+  const getAllAssets = useCallback(async () => {
+    try {
+      const client = createRegistryClient();
+      const tx = await client.get_assets();
+      return tx.result;
+    } catch (err) {
+      console.error('Failed to get all assets:', err);
+      return [];
+    }
+  }, []);
+
+  // Register a new asset (admin only)
+  const registerAsset = useCallback(async (asset: RWAAsset) => {
+    if (!address) throw new Error('Wallet not connected');
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const client = getClient();
+      const tx = await client.register_asset({
+        admin: address,
+        asset,
+      });
+
+      const { result } = await tx.signAndSend({ signTransaction: signTx as any });
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to register asset';
+      setError(message);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [address, signTx, getClient]);
+
+  // Deactivate an asset (admin only)
+  const deactivateAsset = useCallback(async (tokenAddress: string) => {
+    if (!address) throw new Error('Wallet not connected');
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const client = getClient();
+      const tx = await client.deactivate_asset({
+        admin: address,
+        token_address: tokenAddress,
+      });
+
+      const { result } = await tx.signAndSend({ signTransaction: signTx as any });
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to deactivate asset';
+      setError(message);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [address, signTx, getClient]);
+
   return {
+    // Read functions
     getActiveAssets,
+    getAllAssets,
     getAsset,
     isAssetEligible,
     getActiveParticipants,
@@ -120,5 +209,12 @@ export function useRegistry() {
     isParticipantEligible,
     getWhitelistRoot,
     getWhitelistCount,
+    getAdmin,
+    // Write functions (admin only)
+    registerAsset,
+    deactivateAsset,
+    // State
+    isLoading,
+    error,
   };
 }

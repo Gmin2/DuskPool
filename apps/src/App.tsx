@@ -7,6 +7,7 @@ import Dashboard from './components/Dashboard';
 import Escrow from './components/Escrow';
 import History from './components/History';
 import Markets from './components/Markets';
+import Admin from './components/Admin';
 import BackgroundEffects from './components/BackgroundEffects';
 import Sidebar from './components/Sidebar';
 import HUDFrame from './components/HUDFrame';
@@ -63,6 +64,7 @@ const App: React.FC = () => {
             <Route path="/escrow" element={<Escrow />} />
             <Route path="/history" element={<History />} />
             <Route path="/markets" element={<Markets />} />
+            <Route path="/admin" element={<Admin />} />
 
             {/* 404 Page */}
             <Route path="*" element={<NotFound />} />

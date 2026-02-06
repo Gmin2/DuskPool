@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Home, BarChart2, Terminal, Wallet, History } from 'lucide-react';
+import { Home, BarChart2, Terminal, Wallet, History, Settings } from 'lucide-react';
 
 interface SidebarProps {
   currentPath?: string;
@@ -20,6 +20,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentPath = '/', isConnected = fals
     { label: 'ASSETS', path: '/markets', icon: BarChart2 },
     { label: 'ESCROW', path: '/escrow', icon: Wallet },
     { label: 'HISTORY', path: '/history', icon: History },
+    { label: 'ADMIN', path: '/admin', icon: Settings },
   ];
 
   const navItems = isConnected ? privateNavItems : publicNavItems;

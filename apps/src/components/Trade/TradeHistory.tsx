@@ -258,6 +258,7 @@ export const TradeHistory: React.FC<TradeHistoryProps> = ({
                   <td className="px-4 py-3 text-right">{order.price}</td>
                   <td className="px-4 py-3 text-right">{order.amount}</td>
                   <td className="px-4 py-3 text-right flex justify-end gap-2 items-center">
+                    {order.status === 'pending' && <span className="w-2 h-2 bg-blue-500 animate-pulse"></span>}
                     {order.status === 'open' && <span className="w-2 h-2 bg-yellow-500 animate-pulse"></span>}
                     {order.status === 'filled' && <span className="w-2 h-2 bg-emerald-500/70"></span>}
                     {order.status === 'cancelled' && <span className="w-2 h-2 bg-gray-500"></span>}

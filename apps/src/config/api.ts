@@ -8,6 +8,11 @@
 export const API_BASE_URL =
   import.meta.env.VITE_MATCHING_ENGINE_URL || "http://localhost:3001";
 
+// WebSocket URL for real-time updates
+// Uses the same host/port as the HTTP API
+export const WS_URL =
+  import.meta.env.VITE_MATCHING_ENGINE_WS_URL || "ws://localhost:3001";
+
 // API endpoints
 export const API_ENDPOINTS = {
   // Commitment generation

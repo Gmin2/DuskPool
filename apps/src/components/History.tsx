@@ -72,24 +72,24 @@ const History: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [orders, setOrders] = useState<OrderDisplay[]>([]);
   const [settlements, setSettlements] = useState<SettlementDisplay[]>([]);
-  const [assetSymbols, setAssetSymbols] = useState<Record<string, string>>({});
 
-  // Load asset symbols for display
-  const loadAssetSymbols = useCallback(async () => {
+  // Load asset symbols for display - returns symbols directly to avoid dependency cycle
+  const loadAssetSymbols = useCallback(async (): Promise<Record<string, string>> => {
     try {
       const assets = await getActiveAssets();
       const symbols: Record<string, string> = {};
       assets.forEach(asset => {
         symbols[asset.token_address] = asset.symbol;
       });
-      setAssetSymbols(symbols);
+      return symbols;
     } catch (err) {
       console.error('Failed to load asset symbols:', err);
+      return {};
     }
   }, [getActiveAssets]);
 
-  // Load matches (orders) for current user
-  const loadOrders = useCallback(async () => {
+  // Load matches (orders) for current user - accepts symbols to avoid dependency cycle
+  const loadOrders = useCallback(async (symbols: Record<string, string>) => {
     if (!address) return;
 
     try {
@@ -105,7 +105,7 @@ const History: React.FC = () => {
         const isBuyer = match.buyer === address;
         return {
           id: bufferToHex(match.match_id),
-          asset: assetSymbols[match.asset_address] || match.asset_address.slice(0, 8),
+          asset: symbols[match.asset_address] || match.asset_address.slice(0, 8),
           side: isBuyer ? 'buy' : 'sell',
           amount: formatAmount(match.quantity),
           price: formatAmount(match.price),
@@ -121,10 +121,10 @@ const History: React.FC = () => {
       console.error('Failed to load orders:', err);
       setOrders([]);
     }
-  }, [address, getMatches, assetSymbols]);
+  }, [address, getMatches]);
 
-  // Load settlements for current user
-  const loadSettlements = useCallback(async () => {
+  // Load settlements for current user - accepts symbols to avoid dependency cycle
+  const loadSettlements = useCallback(async (symbols: Record<string, string>) => {
     if (!address) return;
 
     try {
@@ -140,7 +140,7 @@ const History: React.FC = () => {
         const isBuyer = settlement.buyer === address;
         return {
           id: bufferToHex(settlement.match_id),
-          asset: assetSymbols[settlement.asset_address] || settlement.asset_address.slice(0, 8),
+          asset: symbols[settlement.asset_address] || settlement.asset_address.slice(0, 8),
           side: isBuyer ? 'buy' : 'sell',
           amount: formatAmount(settlement.quantity),
           price: formatAmount(settlement.price),
@@ -154,13 +154,13 @@ const History: React.FC = () => {
       console.error('Failed to load settlements:', err);
       setSettlements([]);
     }
-  }, [address, getSettlements, assetSymbols]);
+  }, [address, getSettlements]);
 
-  // Load all data
+  // Load all data - fetch symbols first, then pass to other loaders
   const loadData = useCallback(async () => {
     setIsLoading(true);
-    await loadAssetSymbols();
-    await Promise.all([loadOrders(), loadSettlements()]);
+    const symbols = await loadAssetSymbols();
+    await Promise.all([loadOrders(symbols), loadSettlements(symbols)]);
     setIsLoading(false);
   }, [loadAssetSymbols, loadOrders, loadSettlements]);
 
