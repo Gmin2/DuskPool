@@ -6,7 +6,8 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "start": "ts-node src/index.ts",
+    "start": "node dist/server.js",
+    "dev": "ts-node --transpile-only src/server.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -14,12 +15,17 @@
     "@stellar/stellar-sdk": "^13.0.0",
     "@rwa-darkpool/prover": "file:../prover",
     "circomlibjs": "^0.1.7",
-    "snarkjs": "^0.7.0"
+    "snarkjs": "^0.7.0",
+    "express": "^4.21.0",
+    "cors": "^2.8.5"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17",
     "typescript": "^5.0.0",
     "ts-node": "^10.9.0",
+    "ts-node-dev": "^2.0.0",
     "vitest": "^1.0.0"
   }
 }

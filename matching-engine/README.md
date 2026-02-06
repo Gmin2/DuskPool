@@ -10,7 +10,7 @@ pnpm install
 
 ## Overview
 
-The matching engine runs off-chain to find matching buy and sell orders. It maintains an in-memory order book and matches orders based on asset and price compatibility.
+The matching engine runs off-chain to find matching buy and sell orders. It maintains an in-memory order book and matches orders based on asset and price compatibility. See [diagrams/06-data-flow.excalidraw.json](../diagrams/06-data-flow.excalidraw.json) for where it fits in the system.
 
 Since order details are hidden in commitments, the matching engine works with the order parameters provided during submission. In a production system, traders would submit encrypted order details to the matching engine while only the commitment goes on-chain.
 
