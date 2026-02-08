@@ -7,6 +7,8 @@
 
 import express from "express";
 import { corsMiddleware } from "./middleware/cors";
+import { requestLogger } from "./middleware/requestLogger";
+import { logger } from "./lib/logger";
 import commitmentRoutes from "./routes/commitment";
 import ordersRoutes, { setMatchingEngine as setOrdersEngine, setSettlementService as setOrdersSettlementService } from "./routes/orders";
 import matchesRoutes, { setMatchingEngine as setMatchesEngine, setSettlementServiceRef } from "./routes/matches";
@@ -15,6 +17,8 @@ import whitelistRoutes, { setMatchingEngine as setWhitelistEngine } from "./rout
 import { DarkPoolMatchingEngine } from "./index";
 import { SettlementService } from "./services/settlement";
 import { MatchingEngineWebSocket } from "./websocket";
+
+const log = logger.server;
 
 // Environment configuration
 const PORT = process.env.PORT || 3001;
@@ -26,15 +30,10 @@ const app = express();
 // Middleware
 app.use(corsMiddleware);
 app.use(express.json());
+app.use(requestLogger);
 
 // Handle preflight requests explicitly
 app.options("*", corsMiddleware);
-
-// Request logging middleware
-app.use((req, _res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
-  next();
-});
 
 // Initialize matching engine and settlement service
 const matchingEngine = new DarkPoolMatchingEngine(RPC_URL);
@@ -123,7 +122,7 @@ app.use(
     res: express.Response,
     _next: express.NextFunction
   ) => {
-    console.error("[Error]", err.message);
+    log.error({ err }, "Unhandled error");
     res.status(500).json({
       error: "Internal server error",
       details: err.message,
@@ -133,10 +132,6 @@ app.use(
 
 // Start server
 async function start() {
-  console.log("=".repeat(60));
-  console.log("RWA Dark Pool - Matching Engine API Server");
-  console.log("=".repeat(60));
-
   // Initialize whitelist with some test participants
   // In production, this would be loaded from the registry contract
   const testParticipants = [
@@ -148,27 +143,20 @@ async function start() {
 
   try {
     await matchingEngine.initializeWhitelist(testParticipants);
-    console.log("Whitelist initialized with test participants");
   } catch (error: any) {
-    console.warn("Whitelist initialization skipped:", error.message);
+    log.warn({ err: error }, "Whitelist initialization skipped");
   }
 
   // Start HTTP server and attach WebSocket
   const server = app.listen(PORT, () => {
-    console.log("-".repeat(60));
-    console.log(`Server running on http://localhost:${PORT}`);
-    console.log(`WebSocket available at ws://localhost:${PORT}`);
-    console.log(`API documentation: http://localhost:${PORT}/api`);
-    console.log(`Health check: http://localhost:${PORT}/health`);
-    console.log("-".repeat(60));
+    log.info({ port: PORT }, "Server started");
   });
 
   // Initialize WebSocket server
   wsServer = new MatchingEngineWebSocket(server);
-  console.log("[WebSocket] Server initialized and listening for connections");
 }
 
 start().catch((error) => {
-  console.error("Failed to start server:", error);
+  log.fatal({ err: error }, "Failed to start server");
   process.exit(1);
 });

@@ -5,8 +5,10 @@
 import { Router, Request, Response } from "express";
 import { DarkPoolMatchingEngine, Match, SettlementResult } from "../index";
 import { SettlementService } from "../services/settlement";
+import { logger } from "../lib/logger";
 
 const router: Router = Router();
+const log = logger.matches;
 
 // Reference to the matching engine instance (set from server.ts)
 let matchingEngine: DarkPoolMatchingEngine;
@@ -60,7 +62,7 @@ router.get("/", async (_req: Request, res: Response) => {
 
     res.json({ matches });
   } catch (error: any) {
-    console.error("[Matches] Query failed:", error.message);
+    log.error({ err: error }, "Query failed");
     res.status(500).json({
       error: "Failed to get matches",
       details: error.message,
@@ -80,7 +82,7 @@ router.get("/pending", async (_req: Request, res: Response) => {
       pendingCount,
     });
   } catch (error: any) {
-    console.error("[Matches] Pending query failed:", error.message);
+    log.error({ err: error }, "Pending query failed");
     res.status(500).json({
       error: "Failed to get pending matches",
       details: error.message,
@@ -106,7 +108,7 @@ router.get("/settlements", async (_req: Request, res: Response) => {
 
     res.json({ settlements });
   } catch (error: any) {
-    console.error("[Matches] Settlements query failed:", error.message);
+    log.error({ err: error }, "Settlements query failed");
     res.status(500).json({
       error: "Failed to get settlements",
       details: error.message,
@@ -130,7 +132,7 @@ router.post("/process", async (_req: Request, res: Response) => {
       return;
     }
 
-    console.log(`[Matches] Processing ${pendingCount} pending matches...`);
+    log.info({ pendingCount }, "Processing pending matches");
 
     const results = await matchingEngine.processMatches();
 
@@ -143,7 +145,7 @@ router.post("/process", async (_req: Request, res: Response) => {
         const match = matchingEngine.getMatchById(result.matchId);
         if (match) {
           settlementService.queueSettlement(match, result);
-          console.log(`[Matches] Queued settlement for match ${result.matchId}`);
+          log.info({ matchId: result.matchId }, "Queued settlement");
         }
       }
     }
@@ -151,7 +153,7 @@ router.post("/process", async (_req: Request, res: Response) => {
     const successful = results.filter((r) => r.success).length;
     const failed = results.filter((r) => !r.success).length;
 
-    console.log(`[Matches] Processed: ${successful} successful, ${failed} failed`);
+    log.info({ successful, failed }, "Processed matches");
 
     res.json({
       message: `Processed ${results.length} matches`,
@@ -166,7 +168,7 @@ router.post("/process", async (_req: Request, res: Response) => {
       })),
     });
   } catch (error: any) {
-    console.error("[Matches] Processing failed:", error.message);
+    log.error({ err: error }, "Processing failed");
     res.status(500).json({
       error: "Failed to process matches",
       details: error.message,

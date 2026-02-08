@@ -7,8 +7,10 @@ import { OrderSide } from "@rwa-darkpool/prover";
 import { DarkPoolMatchingEngine, PrivateOrder } from "../index";
 import { SettlementService } from "../services/settlement";
 import { addSettlementResult } from "./matches";
+import { logger } from "../lib/logger";
 
 const router: Router = Router();
+const log = logger.orders;
 
 // Reference to the matching engine and settlement service (set from server.ts)
 let matchingEngine: DarkPoolMatchingEngine;
@@ -107,20 +109,25 @@ router.post("/submit", async (req: Request, res: Response) => {
       whitelistIndex: resolvedWhitelistIndex,
     };
 
-    console.log(`[Orders] Using whitelist index ${resolvedWhitelistIndex} for trader ${trader.slice(0, 10)}...`);
+    log.info({
+      whitelistIndex: resolvedWhitelistIndex,
+      trader: trader.slice(0, 10) + "...",
+    }, "Using whitelist index");
 
     matchingEngine.submitOrder(order);
 
-    console.log(
-      `[Orders] Submitted: ${side === 0 ? "BUY" : "SELL"} ${quantity} @ ${price}`
-    );
-    console.log(`  Trader: ${trader.slice(0, 10)}...`);
-    console.log(`  Commitment: ${commitment.slice(0, 20)}...`);
+    log.info({
+      side: side === 0 ? "BUY" : "SELL",
+      quantity,
+      price,
+      trader: trader.slice(0, 10) + "...",
+      commitment: commitment.slice(0, 20) + "...",
+    }, "Order submitted");
 
     // Check if there are pending matches and process them automatically
     const pendingCount = matchingEngine.getPendingMatchesCount();
     if (pendingCount > 0) {
-      console.log(`[Orders] Found ${pendingCount} pending match(es), auto-processing...`);
+      log.info({ pendingCount }, "Found pending matches, auto-processing");
 
       // Process matches asynchronously (don't block the response)
       matchingEngine.processMatches().then((results) => {
@@ -132,16 +139,16 @@ router.post("/submit", async (req: Request, res: Response) => {
             const match = matchingEngine.getMatchById(result.matchId);
             if (match) {
               settlementService.queueSettlement(match, result);
-              console.log(`[Orders] Auto-queued settlement for match ${result.matchId}`);
+              log.info({ matchId: result.matchId }, "Auto-queued settlement");
             }
           }
         }
 
         const successful = results.filter((r) => r.success).length;
         const failed = results.filter((r) => !r.success).length;
-        console.log(`[Orders] Auto-processed: ${successful} successful, ${failed} failed`);
+        log.info({ successful, failed }, "Auto-processed matches");
       }).catch((err) => {
-        console.error("[Orders] Auto-processing failed:", err.message);
+        log.error({ err }, "Auto-processing failed");
       });
     }
 
@@ -179,7 +186,7 @@ router.post("/submit", async (req: Request, res: Response) => {
       noMatchReason,
     });
   } catch (error: any) {
-    console.error("[Orders] Submission failed:", error.message);
+    log.error({ err: error }, "Submission failed");
     res.status(500).json({
       error: "Failed to submit order",
       details: error.message,
@@ -214,7 +221,7 @@ router.get("/:assetAddress", async (req: Request, res: Response) => {
       sellPrices: state.sellPrices,
     });
   } catch (error: any) {
-    console.error("[Orders] Query failed:", error.message);
+    log.error({ err: error }, "Query failed");
     res.status(500).json({
       error: "Failed to get order book state",
       details: error.message,

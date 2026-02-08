@@ -18,6 +18,9 @@ import {
 } from "@rwa-darkpool/prover";
 import * as path from "path";
 import { eventBus } from "./events/EventBus";
+import { logger } from "./lib/logger";
+
+const log = logger.engine;
 
 /** Contract addresses (testnet) - synced with apps/src/contracts/index.ts */
 const CONTRACTS = {
@@ -86,12 +89,10 @@ export class DarkPoolMatchingEngine {
    * Initialize whitelist from registry contract
    */
   async initializeWhitelist(participantIdHashes: string[]): Promise<void> {
-    console.log("Building whitelist tree...");
     const { root, proofs } = await buildWhitelistTree(participantIdHashes);
     this.whitelistRoot = root;
     this.whitelistProofs = proofs;
-    console.log("Whitelist root:", root.slice(0, 20) + "...");
-    console.log("Participants:", participantIdHashes.length);
+    log.info({ participants: participantIdHashes.length }, "Whitelist initialized");
   }
 
   /**
@@ -105,7 +106,6 @@ export class DarkPoolMatchingEngine {
     }
 
     orders.get(order.assetAddress)!.push(order);
-    console.log(`Order submitted: ${order.side === OrderSide.Buy ? "BUY" : "SELL"} ${order.quantity} @ ${order.price}`);
 
     // Emit order:submitted event
     eventBus.emit("order:submitted", {
@@ -161,8 +161,6 @@ export class DarkPoolMatchingEngine {
 
         // Check quantity match - must be exact for ZK proof to work
         if (buyOrder.quantity !== sellOrder.quantity) {
-          console.log(`  Skipping potential match: quantities differ (buy: ${buyOrder.quantity}, sell: ${sellOrder.quantity})`);
-          console.log(`  ZK proofs require exact quantity matches - no partial fills supported yet`);
           continue;
         }
 
@@ -183,9 +181,6 @@ export class DarkPoolMatchingEngine {
         this.completedMatches.push(match);
         matchedBuys.add(i);
         matchedSells.add(j);
-
-        console.log(`Match found: ${match.matchId}`);
-        console.log(`  Quantity: ${executionQuantity}, Price: ${executionPrice}`);
 
         // Emit order:matched event
         eventBus.emit("order:matched", {
@@ -232,10 +227,6 @@ export class DarkPoolMatchingEngine {
    * Generate proof and prepare settlement for a match
    */
   private async settleMatch(match: Match): Promise<SettlementResult> {
-    console.log(`\n${'='.repeat(60)}`);
-    console.log(`Settling match: ${match.matchId}`);
-    console.log(`${'='.repeat(60)}`);
-
     try {
       /** Get Merkle proofs for buyer and seller */
       const buyerProof = this.whitelistProofs.get(match.buyOrder.whitelistIndex);
@@ -247,53 +238,6 @@ export class DarkPoolMatchingEngine {
 
       // Compute assetHash
       const assetHash = await hashAssetAddress(match.buyOrder.assetAddress);
-
-      // DEBUG: Print all values that will be used for proof generation
-      console.log('\n[DEBUG] Settlement Proof Inputs:');
-      console.log('--- BUY ORDER ---');
-      console.log(`  Commitment: ${match.buyOrder.commitment.slice(0, 40)}...`);
-      console.log(`  Commitment format: ${match.buyOrder.commitment.startsWith('0x') ? 'HEX' : 'DECIMAL'}`);
-      console.log(`  Quantity: ${match.buyOrder.quantity.toString()}`);
-      console.log(`  Price: ${match.buyOrder.price.toString()}`);
-      console.log(`  Secret (first 20 chars): ${match.buyOrder.secret.toString().slice(0, 20)}...`);
-      console.log(`  Nonce (first 20 chars): ${match.buyOrder.nonce.toString().slice(0, 20)}...`);
-      console.log(`  Whitelist Index: ${match.buyOrder.whitelistIndex}`);
-
-      console.log('--- SELL ORDER ---');
-      console.log(`  Commitment: ${match.sellOrder.commitment.slice(0, 40)}...`);
-      console.log(`  Commitment format: ${match.sellOrder.commitment.startsWith('0x') ? 'HEX' : 'DECIMAL'}`);
-      console.log(`  Quantity: ${match.sellOrder.quantity.toString()}`);
-      console.log(`  Price: ${match.sellOrder.price.toString()}`);
-      console.log(`  Secret (first 20 chars): ${match.sellOrder.secret.toString().slice(0, 20)}...`);
-      console.log(`  Nonce (first 20 chars): ${match.sellOrder.nonce.toString().slice(0, 20)}...`);
-      console.log(`  Whitelist Index: ${match.sellOrder.whitelistIndex}`);
-
-      console.log('--- EXECUTION ---');
-      console.log(`  Execution Price: ${match.executionPrice.toString()}`);
-      console.log(`  Execution Quantity: ${match.executionQuantity.toString()}`);
-      console.log(`  Asset Hash: ${assetHash.slice(0, 30)}...`);
-      console.log(`  Whitelist Root: ${this.whitelistRoot.slice(0, 30)}...`);
-
-      console.log('--- MERKLE PROOFS ---');
-      console.log(`  Buyer ID Hash: ${buyerProof.idHash.slice(0, 30)}...`);
-      console.log(`  Seller ID Hash: ${sellerProof.idHash.slice(0, 30)}...`);
-
-      // Check for price/quantity mismatch (common cause of proof failure)
-      if (match.buyOrder.price !== match.executionPrice || match.sellOrder.price !== match.executionPrice) {
-        console.log('\n[WARNING] Price mismatch detected!');
-        console.log(`  Buy order price: ${match.buyOrder.price} vs Execution: ${match.executionPrice}`);
-        console.log(`  Sell order price: ${match.sellOrder.price} vs Execution: ${match.executionPrice}`);
-        console.log('  This may cause ZK proof to fail (commitment was generated with original price)');
-      }
-
-      if (match.buyOrder.quantity !== match.executionQuantity || match.sellOrder.quantity !== match.executionQuantity) {
-        console.log('\n[WARNING] Quantity mismatch detected!');
-        console.log(`  Buy order qty: ${match.buyOrder.quantity} vs Execution: ${match.executionQuantity}`);
-        console.log(`  Sell order qty: ${match.sellOrder.quantity} vs Execution: ${match.executionQuantity}`);
-        console.log('  This may cause ZK proof to fail (commitment was generated with original quantity)');
-      }
-
-      console.log("\nGenerating ZK proof...");
 
       // Emit proof:generating event
       eventBus.emit("proof:generating", {
@@ -325,9 +269,6 @@ export class DarkPoolMatchingEngine {
         ZKEY_PATH
       );
 
-      console.log("Proof generated successfully!");
-      console.log("Nullifier:", settlementProof.nullifierHash.slice(0, 20) + "...");
-
       // Emit proof:generated event
       eventBus.emit("proof:generated", {
         matchId: match.matchId,
@@ -345,15 +286,7 @@ export class DarkPoolMatchingEngine {
         success: true,
       };
     } catch (error: any) {
-      console.error(`\n[ERROR] Settlement failed: ${error.message}`);
-      if (error.message.includes('line: 77')) {
-        console.error('[HINT] Line 77 is the BUY commitment verification');
-        console.error('       Check that buyCommitment = Poseidon(assetHash, 0, qty, price, nonce, secret)');
-      }
-      if (error.message.includes('line: 87')) {
-        console.error('[HINT] Line 87 is the SELL commitment verification');
-        console.error('       Check that sellCommitment = Poseidon(assetHash, 1, qty, price, nonce, secret)');
-      }
+      log.error({ err: error, matchId: match.matchId }, "Settlement failed");
 
       // Emit proof:failed event
       eventBus.emit("proof:failed", {

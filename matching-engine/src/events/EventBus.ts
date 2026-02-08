@@ -1,4 +1,7 @@
 import { EventEmitter } from "events";
+import { logger } from "../lib/logger";
+
+const log = logger.eventbus;
 
 // Event payload types
 export interface OrderSubmittedEvent {
@@ -117,7 +120,7 @@ class TypedEventBus {
   }
 
   emit<K extends EventName>(event: K, data: EventMap[K]): boolean {
-    console.log(`[EventBus] Emitting ${event}:`, JSON.stringify(data));
+    log.debug({ event, data }, "Emitting event");
     return this.emitter.emit(event, data);
   }
 

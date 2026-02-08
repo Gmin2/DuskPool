@@ -17,6 +17,9 @@ import {
 import { rpc } from "@stellar/stellar-sdk";
 import { Match, SettlementResult } from "../index";
 import { eventBus } from "../events/EventBus";
+import { logger } from "../lib/logger";
+
+const log = logger.settlement;
 
 /** Contract addresses (testnet) */
 const CONTRACT_IDS = {
@@ -78,7 +81,6 @@ export class SettlementService {
     };
 
     this.pendingSettlements.set(match.matchId, settlement);
-    console.log(`[Settlement] Queued settlement for match ${match.matchId} (ready for settlement)`);
 
     // Emit settlement:queued event
     eventBus.emit("settlement:queued", {
@@ -123,7 +125,7 @@ export class SettlementService {
   } | null> {
     const settlement = this.pendingSettlements.get(matchId);
     if (!settlement) {
-      console.error(`[Settlement] Settlement not found: ${matchId}`);
+      log.error({ matchId }, "Settlement not found");
       return null;
     }
 
@@ -153,7 +155,7 @@ export class SettlementService {
   ): Promise<string | null> {
     const settlement = this.pendingSettlements.get(matchId);
     if (!settlement) {
-      console.error(`[Settlement] Settlement not found: ${matchId}`);
+      log.error({ matchId }, "Settlement not found");
       return null;
     }
 
@@ -207,12 +209,11 @@ export class SettlementService {
         .build();
 
       // Simulate the transaction to get resource footprint
-      console.log(`[Settlement] Simulating transaction for match ${matchId}...`);
       const simResult = await this.rpcServer.simulateTransaction(transaction);
 
       if (rpc.Api.isSimulationError(simResult)) {
         const errorMsg = `Simulation failed: ${simResult.error}`;
-        console.error(`[Settlement] ${errorMsg}`);
+        log.error({ matchId, error: simResult.error }, "Simulation failed");
         settlement.status = "failed";
         settlement.error = errorMsg;
         settlement.updatedAt = Date.now();
@@ -220,15 +221,12 @@ export class SettlementService {
       }
 
       // Prepare the transaction (adds resource footprint and fees)
-      console.log(`[Settlement] Preparing transaction...`);
       const preparedTx = await this.rpcServer.prepareTransaction(transaction);
 
       // Update status
       settlement.status = "ready";
       settlement.unsignedTxXdr = preparedTx.toXDR();
       settlement.updatedAt = Date.now();
-
-      console.log(`[Settlement] Transaction prepared successfully for match ${matchId}`);
 
       // Emit settlement:txBuilt event
       eventBus.emit("settlement:txBuilt", {
@@ -242,7 +240,7 @@ export class SettlementService {
       // Return unsigned XDR (prepared with resource footprint)
       return preparedTx.toXDR();
     } catch (error: any) {
-      console.error(`[Settlement] Failed to build transaction:`, error.message);
+      log.error({ err: error, matchId }, "Failed to build transaction");
       settlement.status = "failed";
       settlement.error = error.message;
       settlement.updatedAt = Date.now();
@@ -268,16 +266,11 @@ export class SettlementService {
         NETWORK_CONFIG.networkPassphrase
       );
 
-      console.log(`[Settlement] Submitting transaction for match ${matchId}...`);
-
       // Submit to network
       const response = await this.rpcServer.sendTransaction(tx);
-      console.log(`[Settlement] Send response:`, JSON.stringify(response, null, 2));
 
       if (response.status === "PENDING") {
         // Wait for confirmation
-        console.log(`[Settlement] Transaction pending, hash: ${response.hash}`);
-
         try {
           let result = await this.rpcServer.getTransaction(response.hash);
           let attempts = 0;
@@ -287,13 +280,10 @@ export class SettlementService {
             attempts++;
           }
 
-          console.log(`[Settlement] Transaction result:`, result.status);
-
           if (result.status === "SUCCESS") {
             settlement.status = "confirmed";
             settlement.txHash = response.hash;
             settlement.updatedAt = Date.now();
-            console.log(`[Settlement] Confirmed: ${response.hash}`);
 
             // Emit settlement:confirmed event
             eventBus.emit("settlement:confirmed", {
@@ -310,7 +300,7 @@ export class SettlementService {
             const errorMsg = `Transaction failed on-chain: ${result.status}`;
             settlement.error = errorMsg;
             settlement.updatedAt = Date.now();
-            console.error(`[Settlement] ${errorMsg}`);
+            log.error({ matchId, status: result.status }, "Transaction failed on-chain");
 
             // Emit settlement:failed event
             eventBus.emit("settlement:failed", {
@@ -324,9 +314,7 @@ export class SettlementService {
             return { success: false, error: errorMsg };
           }
         } catch (pollError: any) {
-          // SDK parsing error (e.g., "Bad union switch") - check Horizon directly
-          console.log(`[Settlement] SDK polling error: ${pollError.message}, checking Horizon...`);
-
+          // SDK parsing error - check Horizon directly
           try {
             const horizonUrl = `https://horizon-testnet.stellar.org/transactions/${response.hash}`;
             const horizonResp = await fetch(horizonUrl);
@@ -336,7 +324,6 @@ export class SettlementService {
               settlement.status = "confirmed";
               settlement.txHash = response.hash;
               settlement.updatedAt = Date.now();
-              console.log(`[Settlement] Confirmed via Horizon: ${response.hash}`);
 
               // Emit settlement:confirmed event
               eventBus.emit("settlement:confirmed", {
@@ -365,14 +352,13 @@ export class SettlementService {
               return { success: false, error: "Transaction failed on-chain" };
             }
           } catch (horizonError) {
-            console.log(`[Settlement] Horizon check failed, assuming success based on PENDING status`);
+            // Ignore horizon errors
           }
 
           // If we can't determine status, assume success since tx was accepted
           settlement.status = "confirmed";
           settlement.txHash = response.hash;
           settlement.updatedAt = Date.now();
-          console.log(`[Settlement] Assumed success: ${response.hash}`);
           return { success: true, txHash: response.hash };
         }
       } else {
@@ -384,12 +370,11 @@ export class SettlementService {
         const errorMsg = `Transaction rejected: ${response.status}. Details: ${errorDetails}`;
         settlement.error = errorMsg;
         settlement.updatedAt = Date.now();
-        console.error(`[Settlement] ${errorMsg}`);
+        log.error({ matchId, status: response.status, details: errorDetails }, "Transaction rejected");
         return { success: false, error: `Transaction status: ${response.status}` };
       }
     } catch (error: any) {
-      console.error(`[Settlement] Submit failed:`, error.message);
-      console.error(`[Settlement] Full error:`, error);
+      log.error({ err: error, matchId }, "Submit failed");
       settlement.status = "failed";
       settlement.error = error.message;
       settlement.updatedAt = Date.now();
@@ -466,11 +451,9 @@ export class SettlementService {
     // Update signing status
     if (isBuyer) {
       settlement.buyerSigned = true;
-      console.log(`[Settlement] Buyer signed: ${matchId}`);
     }
     if (isSeller) {
       settlement.sellerSigned = true;
-      console.log(`[Settlement] Seller signed: ${matchId}`);
     }
 
     // Store the signed TX (latest one with most signatures)
@@ -490,8 +473,6 @@ export class SettlementService {
 
     // Check if both have signed
     if (settlement.buyerSigned && settlement.sellerSigned) {
-      console.log(`[Settlement] Both parties signed, submitting: ${matchId}`);
-
       // Emit signature:complete event
       eventBus.emit("signature:complete", {
         matchId,

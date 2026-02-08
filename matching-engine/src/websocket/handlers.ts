@@ -1,5 +1,8 @@
 import type WebSocket from "ws";
 import type { EventName, EventMap } from "../events/EventBus";
+import { logger } from "../lib/logger";
+
+const log = logger.websocket;
 
 // Message types from client
 export interface SubscribeMessage {
@@ -73,7 +76,7 @@ export class SubscriptionManager {
     }
     this.clientChannels.get(ws)!.add(channel);
 
-    console.log(`[WS] Client subscribed to ${channel}. Total subscribers: ${this.channels.get(channel)!.size}`);
+    log.debug({ channel, subscribers: this.channels.get(channel)!.size }, "Client subscribed");
     return true;
   }
 
@@ -91,7 +94,7 @@ export class SubscriptionManager {
       clientSubs.delete(channel);
     }
 
-    console.log(`[WS] Client unsubscribed from ${channel}`);
+    log.debug({ channel }, "Client unsubscribed");
     return true;
   }
 
@@ -109,7 +112,7 @@ export class SubscriptionManager {
       }
       this.clientChannels.delete(ws);
     }
-    console.log(`[WS] Client removed from all channels`);
+    log.debug("Client removed from all channels");
   }
 
   getSubscribers(channel: string): Set<WebSocket> {
@@ -174,7 +177,7 @@ export function handleMessage(
         sendError(ws, `Unknown message type: ${(parsed as { type: string }).type}`);
     }
   } catch (error) {
-    console.error("[WS] Error parsing message:", error);
+    log.error({ err: error }, "Error parsing message");
     sendError(ws, "Invalid JSON message");
   }
 }
@@ -212,7 +215,7 @@ export function broadcastToChannel<K extends EventName>(
     }
   }
 
-  console.log(`[WS] Broadcast ${event} to ${channel}: ${sent} clients`);
+  log.debug({ event, channel, clients: sent }, "Broadcast");
   return sent;
 }
 

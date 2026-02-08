@@ -1,12 +1,15 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
 import { eventBus, EventName, EventMap } from "../events/EventBus";
+import { logger } from "../lib/logger";
 import {
   SubscriptionManager,
   handleMessage,
   broadcastToChannel,
   sendMessage,
 } from "./handlers";
+
+const log = logger.websocket;
 
 export class MatchingEngineWebSocket {
   private wss: WebSocketServer;
@@ -21,13 +24,13 @@ export class MatchingEngineWebSocket {
     this.setupEventBusListeners();
     this.startHeartbeat();
 
-    console.log("[WS] WebSocket server initialized");
+    log.info("WebSocket server initialized");
   }
 
   private setupConnectionHandler(): void {
     this.wss.on("connection", (ws: WebSocket, req) => {
       const clientIp = req.socket.remoteAddress;
-      console.log(`[WS] New connection from ${clientIp}`);
+      log.info({ clientIp }, "New connection");
 
       // Mark as alive for heartbeat
       (ws as WebSocket & { isAlive: boolean }).isAlive = true;
@@ -42,12 +45,12 @@ export class MatchingEngineWebSocket {
       });
 
       ws.on("close", () => {
-        console.log(`[WS] Connection closed from ${clientIp}`);
+        log.info({ clientIp }, "Connection closed");
         this.subscriptionManager.removeClient(ws);
       });
 
       ws.on("error", (error) => {
-        console.error(`[WS] Error from ${clientIp}:`, error);
+        log.error({ err: error, clientIp }, "WebSocket error");
         this.subscriptionManager.removeClient(ws);
       });
 
@@ -303,7 +306,7 @@ export class MatchingEngineWebSocket {
       this.wss.clients.forEach((ws) => {
         const client = ws as WebSocket & { isAlive: boolean };
         if (client.isAlive === false) {
-          console.log("[WS] Terminating inactive client");
+          log.debug("Terminating inactive client");
           this.subscriptionManager.removeClient(ws);
           return client.terminate();
         }
@@ -331,7 +334,7 @@ export class MatchingEngineWebSocket {
       clearInterval(this.heartbeatInterval);
     }
     this.wss.close();
-    console.log("[WS] WebSocket server closed");
+    log.info("WebSocket server closed");
   }
 }
 

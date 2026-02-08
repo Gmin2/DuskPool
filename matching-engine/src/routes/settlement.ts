@@ -5,8 +5,10 @@
 
 import { Router, Request, Response } from "express";
 import { SettlementService, PendingSettlement } from "../services/settlement";
+import { logger } from "../lib/logger";
 
 const router: Router = Router();
+const log = logger.settlement;
 
 // Settlement service instance (set from server.ts)
 let settlementService: SettlementService;
@@ -41,7 +43,7 @@ router.get("/pending", async (_req: Request, res: Response) => {
 
     res.json({ settlements: formatted });
   } catch (error: any) {
-    console.error("[Settlement] Failed to get pending:", error.message);
+    log.error({ err: error }, "Failed to get pending");
     res.status(500).json({
       error: "Failed to get pending settlements",
       details: error.message,
@@ -80,7 +82,7 @@ router.get("/:matchId", async (req: Request, res: Response) => {
       updatedAt: settlement.updatedAt,
     });
   } catch (error: any) {
-    console.error("[Settlement] Failed to get settlement:", error.message);
+    log.error({ err: error }, "Failed to get settlement");
     res.status(500).json({
       error: "Failed to get settlement",
       details: error.message,
@@ -102,10 +104,10 @@ router.post("/:matchId/prepare", async (req: Request, res: Response) => {
       return;
     }
 
-    console.log(`[Settlement] Prepared data for match ${matchId}`);
+    log.info({ matchId }, "Prepared data");
     res.json(data);
   } catch (error: any) {
-    console.error("[Settlement] Failed to prepare:", error.message);
+    log.error({ err: error }, "Failed to prepare");
     res.status(500).json({
       error: "Failed to prepare settlement",
       details: error.message,
@@ -137,10 +139,10 @@ router.post("/:matchId/build-tx", async (req: Request, res: Response) => {
       return;
     }
 
-    console.log(`[Settlement] Built transaction for match ${matchId}`);
+    log.info({ matchId }, "Built transaction");
     res.json({ txXdr });
   } catch (error: any) {
-    console.error("[Settlement] Failed to build tx:", error.message);
+    log.error({ err: error }, "Failed to build tx");
     res.status(500).json({
       error: "Failed to build settlement transaction",
       details: error.message,
@@ -165,7 +167,7 @@ router.post("/:matchId/submit", async (req: Request, res: Response) => {
     const result = await settlementService.submitSettlement(matchId, signedTxXdr);
 
     if (result.success) {
-      console.log(`[Settlement] Submitted: ${result.txHash}`);
+      log.info({ matchId, txHash: result.txHash }, "Submitted");
       res.json({
         success: true,
         txHash: result.txHash,
@@ -178,7 +180,7 @@ router.post("/:matchId/submit", async (req: Request, res: Response) => {
       });
     }
   } catch (error: any) {
-    console.error("[Settlement] Failed to submit:", error.message);
+    log.error({ err: error }, "Failed to submit");
     res.status(500).json({
       error: "Failed to submit settlement",
       details: error.message,
@@ -201,14 +203,14 @@ router.post("/:matchId/confirm", async (req: Request, res: Response) => {
     }
 
     settlementService.markConfirmed(matchId, txHash);
-    console.log(`[Settlement] Confirmed: ${matchId} -> ${txHash}`);
+    log.info({ matchId, txHash }, "Confirmed");
 
     res.json({
       success: true,
       message: "Settlement marked as confirmed",
     });
   } catch (error: any) {
-    console.error("[Settlement] Failed to confirm:", error.message);
+    log.error({ err: error }, "Failed to confirm");
     res.status(500).json({
       error: "Failed to confirm settlement",
       details: error.message,
@@ -225,7 +227,7 @@ router.get("/stats/summary", async (_req: Request, res: Response) => {
     const stats = settlementService.getStats();
     res.json(stats);
   } catch (error: any) {
-    console.error("[Settlement] Failed to get stats:", error.message);
+    log.error({ err: error }, "Failed to get stats");
     res.status(500).json({
       error: "Failed to get settlement stats",
       details: error.message,
@@ -263,7 +265,7 @@ router.get("/for-trader/:address", async (req: Request, res: Response) => {
 
     res.json({ settlements: formatted });
   } catch (error: any) {
-    console.error("[Settlement] Failed to get trader settlements:", error.message);
+    log.error({ err: error }, "Failed to get trader settlements");
     res.status(500).json({
       error: "Failed to get trader settlements",
       details: error.message,
@@ -287,7 +289,7 @@ router.get("/:matchId/signing-status", async (req: Request, res: Response) => {
 
     res.json(status);
   } catch (error: any) {
-    console.error("[Settlement] Failed to get signing status:", error.message);
+    log.error({ err: error }, "Failed to get signing status");
     res.status(500).json({
       error: "Failed to get signing status",
       details: error.message,
@@ -327,14 +329,14 @@ router.post("/:matchId/sign", async (req: Request, res: Response) => {
     }
 
     if (result.complete) {
-      console.log(`[Settlement] Both parties signed, settlement complete: ${matchId}`);
+      log.info({ matchId }, "Both parties signed, settlement complete");
       res.json({
         success: true,
         complete: true,
         message: "Settlement completed - both parties have signed",
       });
     } else {
-      console.log(`[Settlement] Signature added, waiting for other party: ${matchId}`);
+      log.info({ matchId }, "Signature added, waiting for other party");
       res.json({
         success: true,
         complete: false,
@@ -342,7 +344,7 @@ router.post("/:matchId/sign", async (req: Request, res: Response) => {
       });
     }
   } catch (error: any) {
-    console.error("[Settlement] Failed to add signature:", error.message);
+    log.error({ err: error }, "Failed to add signature");
     res.status(500).json({
       error: "Failed to add signature",
       details: error.message,

@@ -7,8 +7,10 @@
 import { Router, Request, Response } from "express";
 import { Address, nativeToScVal, scValToNative, xdr } from "@stellar/stellar-sdk";
 import { rpc } from "@stellar/stellar-sdk";
+import { logger } from "../lib/logger";
 
 const router: Router = Router();
+const log = logger.whitelist;
 
 // Contract addresses
 const REGISTRY_CONTRACT = "CAYHF7YE6JIQYWJPXCJO6KAJVFPFYHNERIU5IYUR3VGRZQTEI4D6SQRZ";
@@ -28,7 +30,7 @@ export function setMatchingEngine(engine: DarkPoolMatchingEngine) {
  */
 router.post("/sync", async (_req: Request, res: Response) => {
   try {
-    console.log("[Whitelist] Syncing from registry contract...");
+    log.info("Syncing from registry contract");
 
     const rpcServer = new rpc.Server(RPC_URL);
 
@@ -48,7 +50,7 @@ router.post("/sync", async (_req: Request, res: Response) => {
 
     await matchingEngine.initializeWhitelist(idHashes);
 
-    console.log(`[Whitelist] Synced ${participants.length} participants`);
+    log.info({ count: participants.length }, "Synced participants");
 
     res.json({
       success: true,
@@ -60,7 +62,7 @@ router.post("/sync", async (_req: Request, res: Response) => {
       })),
     });
   } catch (error: any) {
-    console.error("[Whitelist] Sync failed:", error.message);
+    log.error({ err: error }, "Sync failed");
     res.status(500).json({
       error: "Failed to sync whitelist",
       details: error.message,
@@ -86,7 +88,7 @@ router.get("/status", async (_req: Request, res: Response) => {
       lastSync: new Date().toISOString(),
     });
   } catch (error: any) {
-    console.error("[Whitelist] Status check failed:", error.message);
+    log.error({ err: error }, "Status check failed");
     res.status(500).json({
       error: "Failed to get whitelist status",
       details: error.message,
@@ -128,7 +130,7 @@ async function getActiveParticipants(rpcServer: rpc.Server): Promise<ParsedParti
 
     return [];
   } catch (error: any) {
-    console.error("[Whitelist] Failed to get participants:", error.message);
+    log.error({ err: error }, "Failed to get participants");
     return [];
   }
 }
@@ -155,7 +157,7 @@ async function getWhitelistRoot(rpcServer: rpc.Server): Promise<string | null> {
 
     return null;
   } catch (error: any) {
-    console.error("[Whitelist] Failed to get root:", error.message);
+    log.error({ err: error }, "Failed to get root");
     return null;
   }
 }
@@ -181,7 +183,7 @@ async function getWhitelistCount(rpcServer: rpc.Server): Promise<number> {
 
     return 0;
   } catch (error: any) {
-    console.error("[Whitelist] Failed to get count:", error.message);
+    log.error({ err: error }, "Failed to get count");
     return 0;
   }
 }

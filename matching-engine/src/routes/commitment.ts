@@ -9,8 +9,10 @@ import {
   hashAsset,
   OrderSide,
 } from "@rwa-darkpool/prover";
+import { logger } from "../lib/logger";
 
 const router: Router = Router();
+const log = logger.commitment;
 
 interface GenerateCommitmentRequest {
   assetAddress: string;
@@ -68,14 +70,9 @@ router.post("/generate", async (req: Request, res: Response) => {
       assetHash,
     };
 
-    console.log(
-      `[Commitment] Generated for ${side === 0 ? "BUY" : "SELL"} ${quantity} @ ${price}`
-    );
-    console.log(`  Commitment: ${result.commitment.slice(0, 20)}...`);
-
     res.json(response);
   } catch (error: any) {
-    console.error("[Commitment] Generation failed:", error.message);
+    log.error({ err: error }, "Generation failed");
     res.status(500).json({
       error: "Failed to generate commitment",
       details: error.message,
@@ -102,7 +99,7 @@ router.post("/hash-asset", async (req: Request, res: Response) => {
 
     res.json({ assetHash });
   } catch (error: any) {
-    console.error("[Commitment] Asset hashing failed:", error.message);
+    log.error({ err: error }, "Asset hashing failed");
     res.status(500).json({
       error: "Failed to hash asset",
       details: error.message,
